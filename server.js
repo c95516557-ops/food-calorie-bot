@@ -4,12 +4,12 @@ const path = require('path');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const app = express();
-const PORT = process.env.PORT ||  || 3000;
+const PORT = process.env.PORT || 3000;
 
 // Обязательно берём ключ из переменной окружения
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_KEY);
 
-// Самая актуальная и быстрая модель на ноябрь 2025, отлично работает с фото
+// Актуальная стабильная модель на ноябрь 2025 (поддерживает фото, бесплатная до 1M токенов/месяц)
 const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" }, { apiVersion: 'v1' });
 
 app.use(express.json({ limit: '10mb' }));
@@ -23,45 +23,46 @@ app.get('/', (req, res) => {
 // Эндпоинт для анализа фото
 app.post('/analyze', async (req, res) => {
   try {
-    const { image } = req.body;
+    const { imageBase64 } = req.body;  // Исправил на imageBase64, как в фронте
 
-    if (!image) {
-      return res.status(400).json({ error: 'Нет изображения' });
+    if (!imageBase64) {
+      return res.status(400).json({ success: false, error: 'Нет изображения' });
     }
 
-    const prompt = `
-Ты — эксперт по питанию. Проанализируй фото еды и ответь строго в таком формате (ничего лишнего):
+    const prompt = `Ты — эксперт по питанию и шеф-повар. Проанализируй фото еды и ответь **ТОЛЬКО** в строгом JSON-формате (ничего лишнего, без Markdown или текста вне JSON):
 
-Блюдо: точное название
-Калории: число ккал
-Белки: число г
-Жиры: число г
-Углеводы: число г
+{
+  "dish": "точное название блюда или продуктов",
+  "calories": 450,
+  "protein": 25,
+  "fat": 18,
+  "carbs": 55,
+  "recipes": [
+    "Рецепт 1: короткое описание на 1 предложение",
+    "Рецепт 2: короткое описание на 1 предложение",
+    "Рецепт 3: короткое описание на 1 предложение"
+  ]
+}
 
-Ещё 3 простых рецепта из похожих ингредиентов (по одному предложению каждый):
-1. …
-2. …
-3. …
-`;
+Оцени вес порции реалистично (на основе фото). Используй базу USDA для калорий и БЖУ.`;
 
-    const imageParts = [
-      {
-        inlineData: {
-          data: image.split(',')[1], // убираем data:image/jpeg;base64,
-          mimeType: image.includes('jpeg') || image.includes('jpg') ? 'image/jpeg' : 'image/png'
-        }
+    const imagePart = {
+      inlineData: {
+        data: imageBase64.split(',')[1],  // Убираем data:image/...;base64,
+        mimeType: imageBase64.includes('png') ? 'image/png' : 'image/jpeg'
       }
-    ];
+    };
 
-    const result = await model.generateContent([prompt, ...imageParts]);
+    const result = await model.generateContent([prompt, imagePart]);
     const response = await result.response;
-    const text = response.text();
+    let text = response.text().replace(/```json|```/g, '').trim();  // Чистим от Markdown
 
-    res.json({ result: text.trim() });
+    const data = JSON.parse(text);  // Парсим JSON
 
+    res.json({ success: true, data });
   } catch (error) {
     console.error('Ошибка Gemini:', error.message);
-    res.status(500).json({ error: 'Не удалось распознать еду. Попробуй другое фото.' });
+    res.status(500).json({ success: false, error: 'Не удалось распознать еду. Попробуй другое фото или проверь ключ.' });
   }
 });
 
