@@ -1,51 +1,71 @@
 require('dotenv').config();
 const express = require('express');
+const path = require('path');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const app = express();
-app.use(express.json({ limit: '10mb' }));
-app.use(express.static('public'));
+const PORT = process.env.PORT ||  || 3000;
 
+// Обязательно берём ключ из переменной окружения
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_KEY);
+
+// Самая актуальная и быстрая модель на ноябрь 2025, отлично работает с фото
 const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
+app.use(express.json({ limit: '10mb' }));
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Главная страница Mini App
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Эндпоинт для анализа фото
 app.post('/analyze', async (req, res) => {
   try {
-    const { imageBase64 } = req.body;
+    const { image } = req.body;
 
-    const prompt = `Ты — профессиональный диетолог и шеф-повар.
-Фото еды. Очень точно определи:
-1) Что это за блюдо/продукты
-2) Примерный вес каждой порции в граммах
-3) Калории + БЖУ (белки, жиры, углеводы)
-4) 3 быстрых рецепта, что ещё можно приготовить из этих ингредиентов
+    if (!image) {
+      return res.status(400).json({ error: 'Нет изображения' });
+    }
 
-Ответ строго JSON:
-{
-  "dish": "название",
-  "ingredients": [{"name": "курица", "amount": "150г"}],
-  "calories": 450,
-  "protein": 32,
-  "fat": 18,
-  "carbs": 42,
-  "recipes": ["Рецепт 1...", "Рецепт 2...", "Рецепт 3..."]
-}`;
+    const prompt = `
+Ты — эксперт по питанию. Проанализируй фото еды и ответь строго в таком формате (ничего лишнего):
 
-    const imagePart = {
-      inlineData: {
-        data: imageBase64.split(',')[1],
-        mimeType: imageBase64.includes('png') ? 'image/png' : 'image/jpeg'
+Блюдо: точное название
+Калории: число ккал
+Белки: число г
+Жиры: число г
+Углеводы: число г
+
+Ещё 3 простых рецепта из похожих ингредиентов (по одному предложению каждый):
+1. …
+2. …
+3. …
+`;
+
+    const imageParts = [
+      {
+        inlineData: {
+          data: image.split(',')[1], // убираем data:image/jpeg;base64,
+          mimeType: image.includes('jpeg') || image.includes('jpg') ? 'image/jpeg' : 'image/png'
+        }
       }
-    };
+    ];
 
-    const result = await model.generateContent([prompt, imagePart]);
-    const text = (await result.response.text()).replace(/```json|```/g, '').trim();
+    const result = await model.generateContent([prompt, ...imageParts]);
+    const response = await result.response;
+    const text = response.text();
 
-    res.json({ success: true, data: JSON.parse(text) });
-  } catch (err) {
-    console.error(err);
-    res.json({ success: false, error: err.message });
+    res.json({ result: text.trim() });
+
+  } catch (error) {
+    console.error('Ошибка Gemini:', error.message);
+    res.status(500).json({ error: 'Не удалось распознать еду. Попробуй другое фото.' });
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log('Бот запущен!'));
+app.listen(PORT, () => {
+  console.log(`Бот запущен! Сервер работает на порту ${PORT}`);
+  console.log(`Mini App доступен по адресу: https://food-calorie-bot-2edm.onrender.com`);
+});
