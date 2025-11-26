@@ -2,70 +2,142 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Калории из фото</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Food'oGram</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #000; color: #fff; margin:0; padding:20px; text-align:center; }
-    h1 { font-size: 24px; margin-bottom: 10px; }
-    button { background: #00BFFF; color: white; border: none; padding: 16px 32px; font-size: 18px; border-radius: 12px; margin: 20px; }
-    .result { margin: 20px; padding: 20px; background: #111; border-radius: 16px; display: none; }
-    img { max-width: 100%; border-radius: 12px; margin: 15px 0; }
-    .recipes p { text-align: left; margin: 10px 0; background: #222; padding: 12px; border-radius: 8px; }
+    body { margin:0; background:#000; color:#fff; font-family:system-ui; text-align:center; padding:20px; }
+    h1 { font-size:28px; margin-bottom:8px; }
+    p { opacity:0.8; margin-bottom:30px; }
+    button { background:#00C853; color:#fff; border:none; padding:16px 32px; font-size:20px; border-radius:50px; cursor:pointer; }
+    #result, #chat { margin:30px auto; max-width:380px; text-align:left; background:#111; padding:15px; border-radius:12px; }
+    #chat { margin-top:20px; }
+    .msg { margin:10px 0; padding:10px; border-radius:12px; max-width:85%; }
+    .user { background:#00C853; margin-left:auto; border-bottom-right-radius:4px; }
+    .ai { background:#222; margin-right:auto; border-bottom-left-radius:4px; }
+    #inputArea { position:fixed; bottom:0; left:0; right:0; background:#111; padding:10px; display:flex; gap:10px; }
+    input { flex:1; padding:14px; background:#222; border:none; border-radius:25px; color:#fff; font-size:16px; }
+    #sendBtn { background:#00C853; width:50px; height:50px; border-radius:50%; font-size:24px; }
   </style>
 </head>
 <body>
-  <h1>Сфотографируйте еду</h1>
-  <p>сфотографировать из мини апп нельзя, поэтому нужно выбрать из галереи устройства:)</p>
-  <button onclick="takePhoto()">выбрать фото</button>
+  <h1>Food'oGram</h1>
+  <p>обработка фото может занять примерно 10 секунд :)</p>
+  <button id="photoBtn">Сделать фото</button>
 
-  <div id="result" class="result">
-    <img id="photo" />
-    <h2 id="dish"></h2>
-    <p><b>Калории: <span id="cal"></span> ккал</b></p>
-    <p>Б: <span id="prot"></span>г | Ж: <span id="fat"></span>г | У: <span id="carb"></span>г</p>
-    <div class="recipes">
-      <h3>Что ещё можно приготовить:</h3>
-      <div id="recipes"></div>
+  <div id="result" style="display:none">
+    <div id="analysis"></div>
+    <div id="chat">
+      <div id="messages"></div>
+    </div>
+    <div id="inputArea">
+      <input type="text" id="question" placeholder="Спросить у ИИ…" />
+      <button id="sendBtn">➤</button>
     </div>
   </div>
 
   <script>
-    function takePhoto() {
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.accept = 'image/*';
-      input.capture = 'environment';
-      input.onchange = async e => {
-        const file = e.target.files[0];
-        const reader = new FileReader();
-        reader.onload = async () => {
-          document.getElementById('photo').src = reader.result;
-          document.getElementById('result').style.display = 'block';
+    const tg = window.Telegram.WebApp;
+    tg.ready();
 
-          const res = await fetch('/analyze', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({imageBase64: reader.result})
-          });
-          const json = await res.json();
-          if (json.success) {
-            const d = json.data;
-            document.getElementById('dish').innerText = d.dish;
-            document.getElementById('cal').innerText = d.calories;
-            document.getElementById('prot').innerText = d.protein;
-            document.getElementById('fat').innerText = d.fat;
-            document.getElementById('carb').innerText = d.carbs;
-            document.getElementById('recipes').innerHTML = d.recipes.map(r => `<p>${r}</p>`).join('');
-          }
-          Telegram.WebApp.expand();
-        };
-        reader.readAsDataURL(file);
+    const photoBtn = document.getElementById('photoBtn');
+    const resultDiv = document.getElementById('result');
+    const analysisDiv = document.getElementById('analysis');
+    const messagesDiv = document.getElementById('messages');
+    const questionInput = document.getElementById('question');
+    const sendBtn = document.getElementById('sendBtn');
+
+    let conversationHistory = []; // для контекста чата
+
+    photoBtn.onclick = () => {
+      tg.showScanQrPopup({text: 'Или просто выбери фото из галереи'}, () => {});
+      photoBtn.innerText = 'Обработка…';
+      photoBtn.disabled = true;
+
+      tg.expand();
+      const file = tg.getPhotoFile();
+      if (!file) {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = e => handleFile(e.target.files[0]);
+        input.click();
+        return;
+      }
+      tg.downloadFile(file.file_id, file.file_path, blob => handleFile(blob));
+    };
+
+    function handleFile(file) {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64 = reader.result;
+        const res = await fetch('/analyze', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({imageBase64: base64})
+        });
+        const data = await res.json();
+        if (data.success) {
+          showResult(data.data);
+          conversationHistory = [
+            {role: "user", parts: [{inlineData: {data: base64.split(',')[1], mimeType: base64.includes('png')?'image/png':'image/jpeg'}}]},
+            {role: "model", parts: [{text: JSON.stringify(data.data)}]}
+          ];
+        } else {
+          analysisDiv.innerHTML = `<p style="color:#f44">Ошибка: ${data.error}</p>`;
+          resultDiv.style.display = 'block';
+        }
+        photoBtn.style.display = 'none';
       };
-      input.click();
+      reader.readAsDataURL(file);
     }
-    Telegram.WebApp.ready();
-    Telegram.WebApp.expand();
+
+    function showResult(data) {
+      analysisDiv.innerHTML = `
+        <h3>${data.dish}</h3>
+        <p><b>Калории:</b> ${data.calories} ккал</p>
+        <p>Белки: ${data.protein}г | Жиры: ${data.fat}г | Углеводы: ${data.carbs}г</p>
+        <p><b>Что ещё можно приготовить:</b></p>
+        ${data.recipes.map(r => `<p>• ${r}</p>`).join('')}
+      `;
+      resultDiv.style.display = 'block';
+    }
+
+    async function sendMessage() {
+      const question = questionInput.value.trim();
+      if (!question) return;
+
+      addMessage(question, 'user');
+      questionInput.value = '';
+      addMessage('Печатает…', 'ai');
+
+      conversationHistory.push({role: "user", parts: [{text: question}]});
+
+      const res = await fetch('/chat', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({history: conversationHistory})
+      });
+      const json = await res.json();
+      removeLastAiMessage();
+      addMessage(json.reply, 'ai');
+      conversationHistory.push({role: "model", parts: [{text: json.reply}]});
+    }
+
+    function addMessage(text, sender) {
+      const div = document.createElement('div');
+      div.className = `msg ${sender}`;
+      div.textContent = text;
+      messagesDiv.appendChild(div);
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+    function removeLastAiMessage() {
+      const msgs = messagesDiv.querySelectorAll('.msg.ai');
+      if (msgs.length) msgs[msgs.length-1].remove();
+    }
+
+    sendBtn.onclick = sendMessage;
+    questionInput.onkeypress = e => e.key === 'Enter' && sendMessage();
   </script>
 </body>
 </html>
