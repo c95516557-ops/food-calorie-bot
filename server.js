@@ -10,7 +10,7 @@ const PORT = process.env.PORT ||  || 3000;
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_KEY);
 
 // Самая актуальная и быстрая модель на ноябрь 2025, отлично работает с фото
-const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" }, { apiVersion: 'v1' });
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
