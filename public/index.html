@@ -12,7 +12,7 @@
     button { background:#00C853; color:#fff; border:none; padding:16px 32px; font-size:20px; border-radius:50px; cursor:pointer; }
     #result, #chat { margin:30px auto; max-width:380px; text-align:left; background:#111; padding:15px; border-radius:12px; }
     #chat { margin-top:20px; }
-    .msg { margin:10px 0; padding:10px; border-radius:12px; max-width:85%; }
+    .msg { margin:10px 0; padding:10px; border-radius:12px; max-width:85%; word-wrap:break-word; }
     .user { background:#00C853; margin-left:auto; border-bottom-right-radius:4px; }
     .ai { background:#222; margin-right:auto; border-bottom-left-radius:4px; }
     #inputArea { position:fixed; bottom:0; left:0; right:0; background:#111; padding:10px; display:flex; gap:10px; }
@@ -22,8 +22,8 @@
 </head>
 <body>
   <h1>Food'oGram</h1>
-  <p>обработка фото может занять примерно 10 секунд :)</p>
-  <button id="photoBtn">Сделать фото</button>
+  <p>сфоткай еду — узнай калории за секунду</p>
+  <button id="photoBtn">Сфотографировать</button>
 
   <div id="result" style="display:none">
     <div id="analysis"></div>
@@ -32,13 +32,14 @@
     </div>
     <div id="inputArea">
       <input type="text" id="question" placeholder="Спросить у ИИ…" />
-      <button id="sendBtn">➤</button>
+      <button id="sendBtn">Send</button>
     </div>
   </div>
 
   <script>
     const tg = window.Telegram.WebApp;
     tg.ready();
+    tg.expand();
 
     const photoBtn = document.getElementById('photoBtn');
     const resultDiv = document.getElementById('result');
@@ -47,46 +48,55 @@
     const questionInput = document.getElementById('question');
     const sendBtn = document.getElementById('sendBtn');
 
-    let conversationHistory = []; // для контекста чата
+    let conversationHistory = [];
 
+    // Главная кнопка — теперь правильно открывает галерею + камеру
     photoBtn.onclick = () => {
-      tg.showScanQrPopup({text: 'Или просто выбери фото из галереи'}, () => {});
       photoBtn.innerText = 'Обработка…';
       photoBtn.disabled = true;
 
-      tg.expand();
-      const file = tg.getPhotoFile();
-      if (!file) {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = 'image/*';
-        input.onchange = e => handleFile(e.target.files[0]);
-        input.click();
-        return;
-      }
-      tg.downloadFile(file.file_id, file.file_path, blob => handleFile(blob));
+      tg.showPopup({
+        title: 'Выбери фото еды',
+        message: 'Можно из галереи или сфоткать прямо сейчас',
+        buttons: [{ type: 'default', text: 'Открыть галерею', id: 'gallery' }]
+      }, (btnId) => {
+        if (btnId === 'gallery') {
+          // Открываем стандартный выбор фото Telegram
+          tg.requestWriteAccess(); // на всякий случай
+          const input = document.createElement('input');
+          input.type = 'file';
+          input.accept = 'image/*';
+          input.capture = 'environment'; // предлагает камеру тоже
+          input.onchange = e => {
+            if (e.target.files[0]) handleFile(e.target.files[0]);
+          };
+          input.click();
+        }
+      });
     };
 
-    function handleFile(file) {
+    async function handleFile(file) {
       const reader = new FileReader();
       reader.onload = async () => {
         const base64 = reader.result;
+
         const res = await fetch('/analyze', {
           method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({imageBase64: base64})
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageBase64: base64 })
         });
-        const data = await res.json();
-        if (data.success) {
-          showResult(data.data);
+        const json = await res.json();
+
+        if (json.success) {
+          showResult(json.data);
           conversationHistory = [
-            {role: "user", parts: [{inlineData: {data: base64.split(',')[1], mimeType: base64.includes('png')?'image/png':'image/jpeg'}}]},
-            {role: "model", parts: [{text: JSON.stringify(data.data)}]}
+            { role: "user", parts: [{ inlineData: { data: base64.split(',')[1], mimeType: base64.includes('png') ? 'image/png' : 'image/jpeg' } }] },
+            { role: "model", parts: [{ text: JSON.stringify(json.data) }] }
           ];
         } else {
-          analysisDiv.innerHTML = `<p style="color:#f44">Ошибка: ${data.error}</p>`;
-          resultDiv.style.display = 'block';
+          analysisDiv.innerHTML = `<p style="color:#f44">Ошибка: ${json.error}</p>`;
         }
+        resultDiv.style.display = 'block';
         photoBtn.style.display = 'none';
       };
       reader.readAsDataURL(file);
@@ -100,28 +110,28 @@
         <p><b>Что ещё можно приготовить:</b></p>
         ${data.recipes.map(r => `<p>• ${r}</p>`).join('')}
       `;
-      resultDiv.style.display = 'block';
     }
 
     async function sendMessage() {
-      const question = questionInput.value.trim();
-      if (!question) return;
+      const q = questionInput.value.trim();
+      if (!q) return;
 
-      addMessage(question, 'user');
+      addMessage(q, 'user');
       questionInput.value = '';
       addMessage('Печатает…', 'ai');
 
-      conversationHistory.push({role: "user", parts: [{text: question}]});
+      conversationHistory.push({ role: "user", parts: [{ text: q }] });
 
       const res = await fetch('/chat', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({history: conversationHistory})
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ history: conversationHistory })
       });
       const json = await res.json();
+
       removeLastAiMessage();
-      addMessage(json.reply, 'ai');
-      conversationHistory.push({role: "model", parts: [{text: json.reply}]});
+      addMessage(json.reply || 'Не смог ответить :(', 'ai');
+      conversationHistory.push({ role: "model", parts: [{ text: json.reply }] });
     }
 
     function addMessage(text, sender) {
@@ -132,8 +142,8 @@
       messagesDiv.scrollTop = messagesDiv.scrollHeight;
     }
     function removeLastAiMessage() {
-      const msgs = messagesDiv.querySelectorAll('.msg.ai');
-      if (msgs.length) msgs[msgs.length-1].remove();
+      const last = messagesDiv.querySelector('.msg.ai:last-child');
+      if (last) last.remove();
     }
 
     sendBtn.onclick = sendMessage;
