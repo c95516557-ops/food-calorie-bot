@@ -7,7 +7,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.static('public'));
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-002" });
 
 app.post('/analyze', async (req, res) => {
   try {
