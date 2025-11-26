@@ -1,174 +1,145 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Food'oGram</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
-    body { margin:0; background:#000; color:#fff; font-family:system-ui; text-align:center; padding:20px; }
-    h1 { font-size:28px; margin-bottom:8px; }
-    p { opacity:0.8; margin-bottom:30px; }
-    button { background:#00C853; color:#fff; border:none; padding:16px 32px; font-size:20px; border-radius:50px; cursor:pointer; margin:10px; }
-    #result { margin:30px auto; max-width:380px; text-align:left; background:#111; padding:15px; border-radius:12px; }
-    .msg { margin:10px 0; padding:12px; border-radius:18px; max-width:88%; word-wrap:break-word; }
-    .user { background:#00C853; margin-left:auto; border-bottom-right-radius:4px; }
-    .ai   { background:#222; margin-right:auto; border-bottom-left-radius:4px; }
-    #inputArea { position:fixed; bottom:0; left:0; right:0; background:#111; padding:10px; display:flex; gap:10px; }
-    input { flex:1; padding:14px; background:#222; border:none; border-radius:25px; color:#fff; font-size:placeholder {color:#888} }
-    #sendBtn { background:#00C853; width:50px; height:50px; border-radius:50%; font-size:24px; }
-    #newChatBtn { background:#333; font-size:16px; padding:10px 20px; }
+    body {margin:0;background:#000;color:#fff;font-family:system-ui;text-align:center;padding:30px;}
+    h1 {font-size:28px;margin-bottom:8px;}
+    p {opacity:0.8;margin-bottom:40px;}
+    button {background:#00C853;color:#fff;border:none;padding:18px 40px;font-size:20px;border-radius:50px;cursor:pointer;}
+    #result {margin:30px auto;max-width:400px;text-align:left;background:#111;padding:20px;border-radius:16px;}
+    .msg {margin:12px 0;padding:12px;border-radius:18px;max-width:88%;word-wrap:break-word;}
+    .user {background:#00C853;margin-left:auto;border-bottom-right-radius:4px;}
+    .ai {background:#222;margin-right:auto;border-bottom-left-radius:4px;}
+    #inputArea {position:fixed;bottom:0;left:0;right:0;background:#111;padding:12px;display:flex;gap:12px;}
+    input {flex:1;padding:15px;background:#222;border:none;border-radius:30px;color:#fff;font-size:17px;}
+    #sendBtn {background:#00C853;width:54px;height:54px;border-radius:50%;font-size:28px;}
   </style>
 </head>
 <body>
+
   <h1>Food'oGram</h1>
-  <p>сфоткай еду — узнай калории<br>или просто поболтай с ИИ на любую тему</p>
-  
-  <button id="photoBtn">Сфотографировать еду</button>
-  <button id="freeChatBtn">Просто поболтать с ИИ</button>
+  <p>10 секунд примерное время ожидания</p>
+  <button id="photoBtn">Сделать фото</button>
 
   <div id="result" style="display:none">
     <div id="analysis"></div>
-    <div id="messages"></div>
-    
+    <div id="messages" style="max-height:50vh;overflow-y:auto;margin:20px 0;"></div>
+
     <div id="inputArea">
-      <input type="text" id="question" placeholder="Напиши что угодно…" autocomplete="off" />
+      <input type="text" id="question" placeholder="Спросить…" autocomplete="off">
       <button id="sendBtn">Send</button>
-    </div>
-    
-    <div style="text-align:center; margin-top:10px;">
-      <button id="newChatBtn">Начать новый чат</button>
     </div>
   </div>
 
   <script>
     const tg = window.Telegram.WebApp;
-    tg.ready();
-    tg.expand();
+    tg.ready(); tg.expand();
 
     const photoBtn = document.getElementById('photoBtn');
-    const freeChatBtn = document.getElementById('freeChatBtn');
-    const resultDiv = document.getElementById('result');
-    const analysisDiv = document.getElementById('analysis');
-    const messagesDiv = document.getElementById('messages');
-    const questionInput = document.getElementById('question');
+    const result = document.getElementById('result');
+    const analysis = document.getElementById('analysis');
+    const messages = document.getElementById('messages');
+    const input = document.getElementById('question');
     const sendBtn = document.getElementById('sendBtn');
-    const newChatBtn = document.getElementById('newChatBtn');
 
-    let conversationHistory = [];  // сюда будет всё: и фото, и текст
+    let history = []; // сюда будет и фото, и весь дальнейший чат
 
-    // === 1. Анализ еды ===
+    // Главная кнопка — открывает галерею + камеру
     photoBtn.onclick = () => {
-      tg.showPopup({
-        title: 'Фото еды',
-        message: 'Выбери из галереи или сфоткай',
-        buttons: [{ type: 'default', text: 'Открыть', id: 'go' }]
-      }, () => {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = 'image/*';
-        input.capture = 'environment';
-        input.onchange = e => e.target.files[0] && handlePhoto(e.target.files[0]);
-        input.click();
-      });
+      photoBtn.disabled = true;
+      photoBtn.textContent = "Обработка…";
+
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.accept = 'image/*';
+      fileInput.capture = 'environment'; // сразу предлагает камеру
+      fileInput.onchange = e => {
+        if (e.target.files[0]) processPhoto(e.target.files[0]);
+      };
+      fileInput.click();
     };
 
-    async function handlePhoto(file) {
+    async function processPhoto(file) {
       const reader = new FileReader();
       reader.onload = async () => {
         const base64 = reader.result;
-        addMessage('Фото отправлено…', 'user');
 
         const res = await fetch('/analyze', {
           method: 'POST',
-          headers: {'Content-Type': 'application/json'},
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ imageBase64: base64 })
         });
         const json = await res.json();
 
         if (json.success) {
           showAnalysis(json.data);
-          // Добавляем фото + результат в историю чата
-          conversationHistory = [
-            { role: "user", parts: [{ inlineData: { data: base64.split(',')[1], mimeType: base64.includes('png')?'image/png':'image/jpeg' }}]},
+          // Запоминаем фото + результат в историю чата
+          history = [
+            { role: "user", parts: [{ inlineData: { 
+              data: base64.split(',')[1], 
+              mimeType: base64.includes('png') ? 'image/png' : 'image/jpeg' 
+            }}]},
             { role: "model", parts: [{ text: JSON.stringify(json.data) }] }
           ];
         } else {
-          addMessage('Не удалось распознать еду :(', 'ai');
-          conversationHistory = [];
+          analysis.innerHTML = `<p style="color:#faa">Ошибка: ${json.error}</p>`;
+          history = [];
         }
-        showChat();
+
+        result.style.display = 'block';
+        photoBtn.style.display = 'none';
+        input.focus();
       };
       reader.readAsDataURL(file);
     }
 
-    // === 2. Просто поболтать без фото ===
-    freeChatBtn.onclick = () => {
-      conversationHistory = [];
-      analysisDiv.innerHTML = '';
-      messagesDiv.innerHTML = '';
-      addMessage('Привет! Задавай любой вопрос', 'ai');
-      showChat();
-    };
-
-    // === 3. Отправка сообщения ===
-    async function sendMessage() {
-      const text = questionInput.value.trim();
-      if (!text) return;
-
-      addMessage(text, 'user');
-      questionInput.value = '';
-      addMessage('Печатает…', 'ai');
-
-      conversationHistory.push({ role: "user", parts: [{ text }] });
-
-      const res = await fetch('/chat', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ history: conversationHistory })
-      });
-      const json = await res.json();
-
-      messagesDiv.lastElementChild.remove(); // убираем "Печатает…"
-      addMessage(json.reply || 'Не смог ответить :(', 'ai');
-      conversationHistory.push({ role: "model", parts: [{ text: json.reply }] });
-    }
-
-    // === Утилиты ===
     function showAnalysis(data) {
-      analysisDiv.innerHTML = `
+      analysis.innerHTML = `
         <h3>${data.dish}</h3>
         <p><b>Калории:</b> ${data.calories} ккал</p>
-        <p>Б: ${data.protein}г • Ж: ${data.fat}г • У: ${data.carbs}г</p>
+        <p>Белки: ${data.protein}г • Жиры: ${data.fat}г • Углеводы: ${data.carbs}г</p>
         <p><b>Ещё идеи:</b></p>
-        ${data.recipes.map(r => `<p>• ${r</p>`).join('')}
+        ${data.recipes.map(r => `<p>• ${r}</p>`).join('')}
       `;
     }
 
-    function showChat() {
-      resultDiv.style.display = 'block';
-      photoBtn.style.display = 'none';
-      freeChatBtn.style.display = 'none';
-      questionInput.focus();
+    // Отправка любого сообщения в чат (на любую тему)
+    async function sendMessage() {
+      const text = input.value.trim();
+      if (!text) return;
+
+      addMessage(text, 'user');
+      input.value = '';
+      addMessage('Печатает…', 'ai');
+
+      history.push({ role: "user", parts: [{ text }] });
+
+      const res = await fetch('/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ history })
+      });
+      const json = await res.json();
+
+      messages.lastChild.remove(); // убираем "Печатает…"
+      addMessage(json.reply || 'Не смог ответить :(', 'ai');
+      history.push({ role: "model", parts: [{ text: json.reply }] });
     }
 
     function addMessage(text, sender) {
       const div = document.createElement('div');
       div.className = `msg ${sender}`;
       div.textContent = text;
-      messagesDiv.appendChild(div);
-      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+      messages.appendChild(div);
+      messages.scrollTop = messages.scrollHeight;
     }
 
-    // Кнопки
     sendBtn.onclick = sendMessage;
-    questionInput.onkeydown = e => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), sendMessage());
-    newChatBtn.onclick = () => {
-      conversationHistory = [];
-      messagesDiv.innerHTML = '';
-      analysisDiv.innerHTML = '';
-      addMessage('Новый чат начат! О чём поговорим?', 'ai');
-    };
+    input.onkeydown = e => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), sendMessage());
   </script>
 </body>
 </html>
